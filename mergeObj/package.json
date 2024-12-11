@@ -1,0 +1,21 @@
+{
+  "name": "mergeobj",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/three": "^0.170.0",
+    "three": "^0.171.0",
+    "three-stdlib": "^2.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1"
+  },
+  "description": ""
+}
