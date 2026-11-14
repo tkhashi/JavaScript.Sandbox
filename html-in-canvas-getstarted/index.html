@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HTML-in-Canvas 検証デモ</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --panel: #ffffff;
+        --ink: #1b2430;
+        --muted: #5d6b7c;
+        --line: #d6dce4;
+        --accent: #1d5fd1;
+        --accent-soft: #e8f0fc;
+        --ok: #1a7f46;
+        --ng: #c0322b;
+        --info: #8a5a00;
+        font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+        color: var(--ink);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); font-size: 14px; line-height: 1.5; }
+      header { padding: 14px 20px 10px; }
+      h1 { margin: 0; font-size: 18px; }
+      header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+      #unsupported { display: none; margin: 0 20px 10px; padding: 10px 14px; border: 1px solid var(--ng); color: var(--ng); background: #fff; border-radius: 6px; }
+
+      .layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 0 20px 24px; align-items: start; }
+      @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+
+      .stage { position: relative; height: min(72vh, 680px); min-height: 360px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+      #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+      #overlay { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .badge { position: absolute; left: 10px; top: 10px; z-index: 5; padding: 3px 8px; border-radius: 4px; background: rgba(27, 36, 48, 0.85); color: #fff; font-size: 12px; pointer-events: none; }
+
+      /* ---- 3D に貼り付くラベル（overlay / canvas どちらでも同じ見た目） ---- */
+      .tag { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: auto; background: #fff; border: 1px solid #aeb8c6; border-radius: 8px; color: var(--ink); font-size: 13px; line-height: 1.4; box-shadow: 0 1px 2px rgba(20, 30, 50, 0.12); }
+      .tag:hover { background: var(--accent-soft); border-color: var(--accent); }
+      .tag.main { width: 176px; padding: 8px 10px; }
+      .tag .name { font-weight: 700; }
+      .tag .value { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+      .tag .row { display: flex; gap: 6px; margin-top: 6px; }
+      .tag button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid #aeb8c6; border-radius: 4px; background: #f6f8fa; cursor: pointer; }
+      .tag button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+      .tag input.memo { width: 84px; font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid #aeb8c6; border-radius: 4px; }
+      .tag input.memo:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+      .tag.pin { display: flex; align-items: center; gap: 5px; width: 104px; height: 26px; padding: 0 8px; font-size: 12px; cursor: pointer; }
+      .tag.pin .dot { width: 8px; height: 8px; border-radius: 50%; background: #2f9e5b; flex: none; }
+      .tag.pin.mid .dot { background: #d99a00; }
+      .tag.pin.high .dot { background: #d33b32; }
+      .tag.pin .pin-val { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+      /* ---- サイドパネル ---- */
+      .panel { display: flex; flex-direction: column; gap: 12px; }
+      section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+      h2 { margin: 0 0 8px; font-size: 13px; }
+      .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+      .seg label { flex: 1; text-align: center; padding: 6px 4px; cursor: pointer; font-size: 13px; }
+      .seg input { position: absolute; opacity: 0; pointer-events: none; }
+      .seg label:has(input:checked) { background: var(--accent); color: #fff; }
+      .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+      .field { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+      .field input[type='range'] { flex: 1; }
+      .field output { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+      .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+      .actions button { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; }
+      .actions button:hover { border-color: var(--accent); color: var(--accent); }
+      .actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      dl.stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-variant-numeric: tabular-nums; }
+      dl.stats dt { color: var(--muted); }
+      dl.stats dd { margin: 0; text-align: right; }
+      .hyp { margin: 0; padding-left: 18px; color: var(--ink); }
+      .hyp li { margin-bottom: 6px; }
+      .hyp small { display: block; color: var(--muted); }
+      .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .shot { font-size: 12px; color: var(--muted); }
+      .shot img:not([src]) { visibility: hidden; }
+      .shot img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border: 1px solid var(--line); border-radius: 4px; background: #eef0f3; margin-top: 2px; }
+      ol.log, ul.tests { margin: 0; padding: 0; list-style: none; font-size: 12px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; max-height: 150px; overflow: auto; }
+      ol.log li, ul.tests li { padding: 1px 0; }
+      ul.tests { max-height: none; }
+      .pass { color: var(--ok); font-weight: 700; }
+      .fail { color: var(--ng); font-weight: 700; }
+      .ref { color: var(--info); font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>HTML-in-Canvas 検証デモ</h1>
+      <p>3D 空間に貼り付く文字（室名タグ・機器タグ・ピン）を、HTML オーバーレイと HTML-in-Canvas で比べる。ドラッグで回転、ホイールでズーム。</p>
+    </header>
+    <p id="unsupported" role="alert">このブラウザは HTML-in-Canvas（canvas の content="drawable"）に対応していません。Chrome 157 以降で開いてください。</p>
+
+    <div class="layout">
+      <div class="stage">
+        <canvas id="gl" content="drawable" aria-label="3D ビュー"></canvas>
+        <div id="overlay"></div>
+        <div class="badge" id="badge"></div>
+      </div>
+
+      <div class="panel">
+        <section>
+          <h2>表示方式</h2>
+          <div class="seg" role="radiogroup" aria-label="表示方式">
+            <label><input type="radio" name="mode" value="overlay" />HTML オーバーレイ</label>
+            <label><input type="radio" name="mode" value="canvas" checked />HTML-in-Canvas</label>
+          </div>
+          <div class="field">
+            <label for="pins">ピンの数</label>
+            <input id="pins" type="range" min="0" max="500" step="10" value="30" />
+            <output id="pinsOut">30</output>
+          </div>
+          <div class="actions">
+            <button type="button" id="resetView">視点リセット</button>
+            <button type="button" id="shot">撮影</button>
+            <button type="button" id="shotBoth">両方式で撮影</button>
+            <button type="button" id="runTests">自動テスト</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>計測</h2>
+          <dl class="stats">
+            <dt>FPS</dt><dd id="stFps">-</dd>
+            <dt>ラベル同期の JS 時間 / フレーム</dt><dd id="stSync">-</dd>
+            <dt>ラベル数（うちピン）</dt><dd id="stCount">-</dd>
+            <dt>壁の裏にあるラベル（CPU 判定）</dt><dd id="stOcc">-</dd>
+          </dl>
+        </section>
+
+        <section>
+          <h2>疑念ごとの見方</h2>
+          <ol class="hyp">
+            <li>壁の裏のタグが透けるか<small>回転して「壁の裏にあるラベル」が増えるところを、方式を切り替えて見比べる。</small></li>
+            <li>ラベルにホバー・クリック・入力できるか<small>FCU-12 のメモ欄に入力、各「詳細」ボタンをクリック。下のログに出る。</small></li>
+            <li>画像書き出しにラベルが入るか<small>「両方式で撮影」→ 下のサムネイルを比べる。</small></li>
+            <li>ピンが多いと重くなるか<small>スライダーを 500 にして「ラベル同期の JS 時間」を比べる。</small></li>
+            <li>自動テストしやすいか<small>「自動テスト」で DOM 取得とヒットテストを検証する。</small></li>
+          </ol>
+        </section>
+
+        <section>
+          <h2>撮影結果（canvas.toBlob）</h2>
+          <div class="shots">
+            <div class="shot">HTML オーバーレイ<img id="shotOverlay" alt="オーバーレイ方式の撮影結果" /></div>
+            <div class="shot">HTML-in-Canvas<img id="shotCanvas" alt="HTML-in-Canvas 方式の撮影結果" /></div>
+          </div>
+        </section>
+
+        <section>
+          <h2>自動テスト結果</h2>
+          <ul class="tests" id="testOut"><li>未実行</li></ul>
+        </section>
+
+        <section>
+          <h2>イベントログ</h2>
+          <ol class="log" id="log"></ol>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
