@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HTML-in-Canvas × three.js 試作</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --panel: #ffffff;
+        --ink: #1b2430;
+        --muted: #5d6b7c;
+        --line: #d6dce4;
+        --accent: #1d5fd1;
+        --accent-soft: #e8f0fc;
+        --ng: #c0322b;
+        font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+        color: var(--ink);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); font-size: 14px; line-height: 1.5; }
+      header { padding: 14px 20px 10px; }
+      h1 { margin: 0; font-size: 18px; }
+      header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+      #unsupported { display: none; margin: 0 20px 10px; padding: 10px 14px; border: 1px solid var(--ng); color: var(--ng); background: #fff; border-radius: 6px; }
+
+      .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; padding: 0 20px 24px; align-items: start; }
+      @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+
+      .stage { position: relative; height: min(72vh, 680px); min-height: 360px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+      #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+      .badge { position: absolute; left: 10px; top: 10px; z-index: 5; padding: 3px 8px; border-radius: 4px; background: rgba(27, 36, 48, 0.85); color: #fff; font-size: 12px; pointer-events: none; }
+
+      /* ---- 3D に貼り付くラベル（原典 html-in-canvas-getstarted と同じ見た目） ---- */
+      .tag { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: auto; background: #fff; border: 1px solid #aeb8c6; border-radius: 8px; color: var(--ink); font-size: 13px; line-height: 1.4; box-shadow: 0 1px 2px rgba(20, 30, 50, 0.12); }
+      .tag:hover { background: var(--accent-soft); border-color: var(--accent); }
+      .tag.main { width: 176px; padding: 8px 10px; }
+      .tag .name { font-weight: 700; }
+      .tag .value { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+      .tag .row { display: flex; gap: 6px; margin-top: 6px; }
+      .tag button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid #aeb8c6; border-radius: 4px; background: #f6f8fa; cursor: pointer; }
+      .tag button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+      .tag input.memo { width: 84px; font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid #aeb8c6; border-radius: 4px; }
+      .tag input.memo:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+      .tag.pin { display: flex; align-items: center; gap: 5px; width: 104px; height: 26px; padding: 0 8px; font-size: 12px; cursor: pointer; }
+      .tag.pin .dot { width: 8px; height: 8px; border-radius: 50%; background: #2f9e5b; flex: none; }
+      .tag.pin.mid .dot { background: #d99a00; }
+      .tag.pin.high .dot { background: #d33b32; }
+      .tag.pin .pin-val { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+      /* ---- サイドパネル ---- */
+      .panel { display: flex; flex-direction: column; gap: 12px; }
+      section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+      h2 { margin: 0 0 8px; font-size: 13px; }
+      .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+      .actions button { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; }
+      .actions button:hover { border-color: var(--accent); color: var(--accent); }
+      .shot { font-size: 12px; color: var(--muted); }
+      .shot img:not([src]) { visibility: hidden; }
+      .shot img { display: block; width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #eef0f3; margin-top: 2px; }
+      ol.log { margin: 0; padding: 0; list-style: none; font-size: 12px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; max-height: 220px; overflow: auto; }
+      ol.log li { padding: 1px 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>HTML-in-Canvas × three.js 試作</h1>
+      <p>原典（素の WebGL2）と同じ 3D ラベル表示を three.js で実装し直した試作。ドラッグで回転、ホイールでズーム。</p>
+    </header>
+    <p id="unsupported" role="alert">このブラウザは HTML-in-Canvas（canvas の content="drawable"）に対応していません。Chrome 157 以降で開いてください。</p>
+
+    <div class="layout">
+      <div class="stage">
+        <canvas id="gl" content="drawable" aria-label="3D ビュー"></canvas>
+        <div class="badge">three.js r187 / WebGL2</div>
+      </div>
+
+      <div class="panel">
+        <section>
+          <h2>操作</h2>
+          <div class="actions">
+            <button type="button" id="resetView">視点リセット</button>
+            <button type="button" id="shot">撮影（canvas.toBlob）</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>撮影結果</h2>
+          <div class="shot">HTML-in-Canvas（ラベル入り）<img id="shotImg" alt="撮影結果" /></div>
+        </section>
+
+        <section>
+          <h2>イベントログ</h2>
+          <ol class="log" id="log"></ol>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
